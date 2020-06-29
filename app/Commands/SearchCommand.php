@@ -7,6 +7,9 @@ use Illuminate\Console\Scheduling\Schedule;
 use LaravelZero\Framework\Commands\Command;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use App\Models\ClientDatabase;
+use App\Resources\Encryption;
+use PDO;
 
 class SearchCommand extends Command
 {
@@ -32,42 +35,63 @@ class SearchCommand extends Command
      */
     public function handle()
     {
+        #$consulta = "SELECT MAX(id_permissao) FROM sis_permissoes";
+        #$consulta = "SELECT * FROM tbconcursos LIMIT 3";
+        $consulta = "SELECT MAX(id_tipocampo) FROM tbformularios_campos_tipos";
 
-
-        $consulta = "SELECT MAX(id_permissao) FROM sis_permissoes";
-
-        $this->comment('[' . date('H:i:s') . '] Iniciando...');
+        $time_start = microtime(true);
+        $this->comment('[' . date('H:i:s') . '] Iniciando consulta. Aguarde...');
         $this->line($consulta);
+        $this->line('');
 
-        $databases = DB::table('client_databases')->limit(10)->get();
+        try {
+            $this->warn('Consultando db superadmin');
+            $databases = new ClientDatabase();
+            $databases = $databases->limit(3)->get();
 
+            #$databases = DB::table('client_databases')->limit(3)->pluck('name');
+        } catch (Exception $e) {
+            $mensagem = "Erro ao selecionar databases: " . $e->getMessage();
+            $this->error($mensagem);
+            die;
+        }
 
         foreach ($databases as $database) {
+            $this->line('Consulta ' . $database->name);
+
             DB::purge('mysql');
-
             $config = Config::get('database.connections.mysql');
+            $config['host'] = env('DB_HOST');
             $config['database'] = $database->name;
+            $config['username'] = env('DB_USERNAME');
+            $config['password'] = env('DB_PASSWORD');
+            $config['charset'] = $database->charset;
+            $config['collation'] = $database->collation;
             Config::set('database.connections.mysql', $config);
-
             DB::reconnect('mysql');
-            $this->line('Reconectou');
 
             try {
                 $resultados = DB::select($consulta);
-                $this->line('Consultou');
 
-                $this->comment($database->name);
-                foreach ($resultados as $resultado) {
-                    $resultado = array_values(get_object_vars($resultado));
-                    #dd($resultado, $resultado[0]);
-                    $this->line($resultado[0]);
+                #$this->comment('[' . date('H:i:s') . '] Resultado database ' . $database);
+                foreach ($resultados as $linha) {
+
+                    $linha = json_encode($linha);
+                    $this->line($linha);
+                    $this->line('');
                 }
             } catch (Exception $e) {
-                $mensagem = "Erro ao executar função. Database: $database->name ->  " . $e->getMessage();
+                $mensagem = "Erro ao executar função. Database: $database ->  " . $e->getMessage();
                 $this->error($mensagem);
+                die;
             }
         }
+
+        $time_end = microtime(true);
+        $time = round($time_end - $time_start, 3);
+
         $this->comment('[' . date('H:i:s') . '] Finalizado.');
+        echo "Executado em " .  $time . "s";
     }
 
     /**
